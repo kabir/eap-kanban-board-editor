@@ -19,7 +19,7 @@
  * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
  */
-package org.redhat.eap.jira.kanban.board.editor;
+package org.redhat.eap.jira.kanban.board.editor.commands;
 
 import java.net.URI;
 import java.util.List;
@@ -43,6 +43,8 @@ public class Commands {
     final JiraConfiguration jiraConfiguration;
     final HttpAuthenticationFeature authenticationFeature;
     final Client client;
+    private Board board;
+    private JqlSwimlaneConfigurations.JqlSwimlaneConfig jqlSwimlaneConfig;
 
     Commands(JiraConfiguration jiraConfiguration) {
         this.jiraConfiguration = jiraConfiguration;
@@ -87,21 +89,16 @@ public class Commands {
 
         Response response = target.request(MediaType.APPLICATION_JSON)
                 .delete();
-        if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
+        if (!isSuccess(response)) {
             throw new IllegalStateException("Could not delete " + id + " " + response.getStatus() + " " + responseBody(response, true));
         }
     }
-
 
     public Board copyBoard(Board source, String targetName) {
         WebTarget target = client.target(
                 getRootGrasshopperUri().path("rapidview").path(String.valueOf(source.id)).path("copy"));
 
-        Response response = target.request(MediaType.APPLICATION_JSON)
-                .put(Entity.entity("{}", MediaType.APPLICATION_JSON));
-        if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
-            throw new IllegalStateException("Could not copy " + source.id + " " + response.getStatus() + " " + responseBody(response, true));
-        }
+        Response response = performPut(target, new ModelNode().setEmptyObject());
 
         ModelNode modelNode = responseBody(response);
         String sourceUri = source.uri.toString();
@@ -111,6 +108,61 @@ public class Commands {
                 UriBuilder.fromUri(sourceUri).path(modelNode.get("id").asString()).build(),
                 modelNode.get("name").asString());
     }
+
+    public void setSwimlaneStrategy(Board board, SwimLaneStrategy strategy) {
+        WebTarget target = client.target(
+                getRootGrasshopperUri().path("rapidviewconfig").path("swimlaneStrategy"));
+        ModelNode node = new ModelNode();
+        node.get("id").set(board.id);
+        node.get("swimlaneStrategyId").set(strategy.jsonValue);
+        performPut(target, node);
+    }
+
+    public void deleteExistingJqlSwimlanes(Board board) {
+        WebTarget target = client.target(
+                getRootGrasshopperUri().path("xboard").path("work").path("allData")
+                    .queryParam("rapidViewId", String.valueOf(board.getId()))
+                    .queryParam("selectedProjectKey", jiraConfiguration.getProject()));
+
+        Response response = target.request(MediaType.APPLICATION_JSON)
+                .get();
+        ModelNode boardConfig = responseBody(response);
+        ModelNode swimlanes = boardConfig.get("swimlanesData", "customSwimlanesData", "swimlanes");
+        if (!swimlanes.isDefined()) {
+            throw new IllegalStateException("The exisiting board does not appear to use custom swimlanes");
+        }
+        for (ModelNode swimlane : swimlanes.asList()) {
+            if (!swimlane.get("defaultSwimlane").asBoolean()) {
+                //Delete the swimlane
+                deleteSwimlane(board, swimlane.get("name").asString(), swimlane.get("id").asInt());
+            }
+        }
+    }
+
+    private void deleteSwimlane(Board board, String name, int swimlaneId) {
+        WebTarget target = client.target(
+                getRootGrasshopperUri().path("swimlanes").path(String.valueOf(board.id)).path(String.valueOf(swimlaneId)));
+
+        Response response = target.request(MediaType.APPLICATION_JSON)
+                .delete();
+        if (!isSuccess(response)) {
+            throw new IllegalStateException("Could not delete swimlane " + name + "(" + swimlaneId + ")");
+        }
+    }
+
+
+    public void addJqlSwimlane(Board board, JqlSwimlaneConfigurations.JqlSwimlaneConfig jqlSwimlaneConfig) {
+        WebTarget target = client.target(
+                getRootGrasshopperUri().path("swimlanes").path(String.valueOf(board.id)));
+        ModelNode node = new ModelNode();
+        node.get("name").set(jqlSwimlaneConfig.getName());
+        node.get("query").set(jqlSwimlaneConfig.getJql());
+        if (jqlSwimlaneConfig.getDescription() != null) {
+            node.get("description").set(jqlSwimlaneConfig.getDescription());
+        }
+        performPost(target, node);
+    }
+
 
     private ModelNode getOneValue(Response response, String key, String value) {
         ModelNode result = responseBody(response);
@@ -147,7 +199,29 @@ public class Commands {
         }
     }
 
-    static class Board {
+    private Response performPut(WebTarget target, ModelNode requestBody) {
+        Response response = target.request(MediaType.APPLICATION_JSON)
+                .put(Entity.entity(requestBody.toJSONString(true), MediaType.APPLICATION_JSON));
+        if (!isSuccess(response)) {
+            throw new IllegalStateException("Could not set swimlane strategy " + response.getStatus() + " " + responseBody(response, true));
+        }
+        return response;
+    }
+
+    private Response performPost(WebTarget target, ModelNode requestBody) {
+        Response response = target.request(MediaType.APPLICATION_JSON)
+                .post(Entity.entity(requestBody.toJSONString(true), MediaType.APPLICATION_JSON));
+        if (!isSuccess(response)) {
+            throw new IllegalStateException("Could not set swimlane strategy " + response.getStatus() + " " + responseBody(response, true));
+        }
+        return response;
+    }
+
+    boolean isSuccess(Response response) {
+        return response.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
+    }
+
+    public static class Board {
         final int id;
         final URI uri;
         final String name;
@@ -157,7 +231,22 @@ public class Commands {
             this.uri = uri;
             this.name = name;
         }
+
+        public int getId() {
+            return id;
+        }
     }
 
+    public enum SwimLaneStrategy {
+        /*STORIES("parentChild"),
+        EPICS("epic"),
+        ASSIGNEES("assignee"),*/
+        QUERIES("custom");
 
+        private final String jsonValue;
+
+        SwimLaneStrategy(String jsonValue) {
+            this.jsonValue = jsonValue;
+        }
+    }
 }

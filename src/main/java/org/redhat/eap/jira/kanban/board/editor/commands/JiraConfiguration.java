@@ -19,7 +19,7 @@
  * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
  */
-package org.redhat.eap.jira.kanban.board.editor;
+package org.redhat.eap.jira.kanban.board.editor.commands;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -47,22 +47,22 @@ public class JiraConfiguration {
     private static final String USERNAME_KEY = "editor.username";
     private static final String PASSWORD_KEY = "editor.password";
     private static final String JIRA_URL_KEY = "editor.jira.url";
-    private static final String JIRA_URL_DEFAULT = "https://issues.jboss.org";
-
+    private static final String PROJECT_KEY = "editor.jira.project";
 
     private final String username;
     private final String password;
     private final URI uri;
-
+    private final String project;
     private Commands commands;
 
-    private JiraConfiguration(String username, String password, URI uri) {
+    private JiraConfiguration(String username, String password, URI uri, String project) {
         this.username = username;
         this.password = password;
         this.uri = uri;
+        this.project = project;
     }
 
-    Commands createCommands() {
+    public Commands createCommands() {
         if (commands == null) {
             Commands commands = new Commands(this);
             this.commands = commands;
@@ -82,35 +82,50 @@ public class JiraConfiguration {
         return uri;
     }
 
+    public Object getProject() {
+        return project;
+    }
+
     public static JiraConfiguration loadConfiguration() throws Exception {
-        final URL url = JiraConfiguration.class.getResource("/configuration.properties");
-        final Properties properties = new Properties();
-        if (url == null) {
+        final URL configUrl = JiraConfiguration.class.getResource("/configuration.properties");
+        final Properties configProperties = new Properties();
+        if (configUrl == null) {
             System.out.println("There is no /src/resources/jiraConfiguration.properties file. Relying on system properties");
         } else {
-            try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(new File(url.toURI())))){
-                properties.load(in);
+            try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(new File(configUrl.toURI())))){
+                configProperties.load(in);
             }
         }
 
-        final String username = getProperty(USERNAME_KEY, null, properties, url);
-        final String password = getProperty(PASSWORD_KEY, null, properties, url);
-        final String jiraUrl = getProperty(JIRA_URL_KEY, JIRA_URL_DEFAULT, properties, url);
+        final URL defaultsUrl = JiraConfiguration.class.getResource("/defaults.properties");
+        final Properties defaultsProperties = new Properties();
+        if (defaultsUrl != null) {
+            try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(new File(defaultsUrl.toURI())))){
+                defaultsProperties.load(in);
+            }
+        }
 
-        return new JiraConfiguration(username, password, new URL(jiraUrl).toURI());
+        final String username = getProperty(USERNAME_KEY, configProperties, defaultsProperties, configUrl);
+        final String password = getProperty(PASSWORD_KEY, configProperties, defaultsProperties, configUrl);
+        final String jiraUrl = getProperty(JIRA_URL_KEY, configProperties, defaultsProperties, configUrl);
+        final String project = getProperty(PROJECT_KEY, configProperties, defaultsProperties, configUrl);
+
+        return new JiraConfiguration(username, password, new URL(jiraUrl).toURI(), project);
     }
 
-    private static String getProperty(String key, String defaultValue, Properties properties, URL propertiesUrl) {
+    private static String getProperty(String key, Properties configProperties, Properties defaultProperties, URL propertiesUrl) {
         String value = System.getProperty(key);
         if (value == null) {
-            value = properties.getProperty(key);
+            value = configProperties.getProperty(key);
+        }
+        if (value == null) {
+            value = defaultProperties.getProperty(key);
         }
         if (value != null) {
             return value;
         }
-        if (defaultValue != null) {
-            return defaultValue;
-        }
+
         throw new IllegalStateException("No value set for '" + key + "' either in " + propertiesUrl + " or as -D" + key + "=...");
     }
+
 }

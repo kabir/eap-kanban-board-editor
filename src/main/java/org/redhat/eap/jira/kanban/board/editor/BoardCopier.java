@@ -23,32 +23,30 @@ package org.redhat.eap.jira.kanban.board.editor;
 
 import org.redhat.eap.jira.kanban.board.editor.commands.Commands;
 import org.redhat.eap.jira.kanban.board.editor.commands.JiraConfiguration;
-import org.redhat.eap.jira.kanban.board.editor.commands.JqlSwimlaneConfigurations;
-import org.redhat.eap.jira.kanban.board.editor.commands.JqlSwimlaneConfigurations.JqlSwimlaneConfig;
-import org.redhat.eap.jira.kanban.board.editor.commands.JqlSwimlaneConfigurations.JqlSwimlaneSet;
 
 /**
  * @author Kabir Khan
  */
-public class SwimlaneCreator {
+public class BoardCopier {
     public static void main(String[] args) throws Exception {
         //TODO make sure these are configurable
-        String boardName = "Copy of Throwaway";
-        JqlSwimlaneSet swimlaneSet = JqlSwimlaneSet.TEST;
-        boolean deleteExistingSwimlanes = true;
+        String sourceName = "Throwaway";
+        String targetName = "Copy of Throwaway";
+
 
         JiraConfiguration jiraConfiguration = JiraConfiguration.loadConfiguration();
         Commands commands = jiraConfiguration.createCommands();
-        Commands.Board board = commands.findBoard(boardName);
+        Commands.Board source = commands.findBoard(sourceName);
 
-        if (deleteExistingSwimlanes) {
-            commands.deleteExistingJqlSwimlanes(board);
+        Commands.Board oldTarget = null;
+        try {
+            oldTarget = commands.findBoard(targetName);
+        } catch (IllegalStateException e) {
         }
-        commands.setSwimlaneStrategy(board, Commands.SwimLaneStrategy.QUERIES);
-        JqlSwimlaneConfig[] swimlaneConfigs = JqlSwimlaneConfigurations.getSwimlaneConfigs(swimlaneSet);
-        for (int i = swimlaneConfigs.length - 1 ; i >= 0 ; i--) {
-            commands.addJqlSwimlane(board, swimlaneConfigs[i]);
+        if (oldTarget != null) {
+            commands.deleteBoard(oldTarget.getId());
         }
+        Commands.Board newBoard = commands.copyBoard(source, targetName + System.currentTimeMillis());
 
         System.out.println("done");
     }
